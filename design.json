@@ -1,0 +1,33 @@
+{
+  "dimensions": {
+    "inner": {
+      "length": 100.0,
+      "width": 25.0
+    },
+    "outer": {
+      "length": 131.0,
+      "width": 60.0
+    }
+  },
+  "traces": {
+    "width": 0.45,
+    "spacing": 0.1,
+    "turns_per_layer": 28,
+    "total_layers": 6,
+    "total_length": 43.32
+  },
+  "electrical": {
+    "resistance": 25.13,
+    "voltage": 8.2,
+    "current": 0.326,
+    "current_density": 10.45,
+    "power": 2.68
+  },
+  "thermal": {
+    "temperature_rise": 0.3,
+    "final_temperature": 20.3
+  },
+  "performance": {
+    "magnetic_moment": "1.65e-01"
+  }
+}
