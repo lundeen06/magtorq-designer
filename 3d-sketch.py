@@ -78,47 +78,114 @@ def format_json_for_display(data: dict) -> str:
     
     return info_text
 
-# [Previous imports and helper functions remain the same until the create_3d_visualization function]
+def transform_coordinates(x: list, y: list, position: tuple, rotation_deg: float):
+    """Transform coordinates based on position and rotation"""
+    # Convert rotation to radians
+    theta = np.radians(rotation_deg)
+    
+    # Create rotation matrix
+    cos_theta = np.cos(theta)
+    sin_theta = np.sin(theta)
+    
+    # Transform each point
+    transformed_x = []
+    transformed_y = []
+    
+    for px, py in zip(x, y):
+        # Rotate point
+        rotated_x = px * cos_theta - py * sin_theta
+        rotated_y = px * sin_theta + py * cos_theta
+        
+        # Translate point
+        final_x = rotated_x + position[0]
+        final_y = rotated_y + position[1]
+        
+        transformed_x.append(final_x)
+        transformed_y.append(final_y)
+    
+    return transformed_x, transformed_y
 
-def add_molex_connector(fig: go.Figure, params: dict, z_top: float):
-    """Add Molex connector visualization with IO pins"""
+def add_molex_connector(fig: go.Figure, params: dict, z_top: float, 
+                       position: tuple = None, rotation_deg: float = 0):
+    """Add Molex connector visualization with IO pins, with configurable position and rotation
+    
+    Args:
+        fig: Plotly figure object
+        params: Design parameters dictionary
+        z_top: Z-coordinate for top layer
+        position: (x, y) tuple for connector position. If None, defaults to left side.
+        rotation_deg: Rotation in degrees (clockwise from vertical)
+    """
     connector_width = 5.0
     connector_length = 8.0
     pin_radius = 0.6
     
-    conn_x = params['dimensions']['outer']['width']/2 - connector_width/2
-    conn_y = -params['dimensions']['outer']['length']/2 + connector_length/2
+    # Calculate the radius of the outermost spiral turn
+    outer_turn_width = params['dimensions']['outer']['width']
+    outer_turn_length = params['dimensions']['outer']['length']
     
-    # Connector outline
-    x = [conn_x, conn_x + connector_width, conn_x + connector_width, conn_x, conn_x]
-    y = [conn_y - connector_length/2, conn_y - connector_length/2, 
-         conn_y + connector_length/2, conn_y + connector_length/2, 
-         conn_y - connector_length/2]
+    # Default position if none provided
+    if position is None:
+        position = (-outer_turn_width/2 - connector_width, 0)  # Left side default
+    
+    # Create base connector outline (anchored at left edge)
+    base_x = [0, connector_width, connector_width, 0, 0]
+    base_y = [-connector_length/2, -connector_length/2, connector_length/2, connector_length/2, -connector_length/2]
+    
+    # Transform connector outline
+    x, y = transform_coordinates(base_x, base_y, position, rotation_deg)
     z = [z_top] * 5
     
+    # Create a "dummy" trace for the connector layer group
+    fig.add_trace(
+        go.Scatter3d(
+            x=[None], y=[None], z=[None],
+            mode='lines',
+            name='Connector Layer',
+            legendgroup='connector_layer',
+            legendgrouptitle_text='Connector Layer',
+            showlegend=True
+        ),
+        row=1, col=1
+    )
+    
+    # Add connector outline
     fig.add_trace(
         go.Scatter3d(
             x=x, y=y, z=z,
             mode='lines',
             line=dict(color='darkgray', width=3),
             name='Connector',
-            legendgroup='hardware',
-            legendgrouptitle_text='Hardware'
+            legendgroup='connector_layer',
+            showlegend=False
         ),
         row=1, col=1
     )
     
-    # Add IO pins
-    pin_positions = [
-        (conn_x + connector_width/2, conn_y - connector_length/4, 'I'),
-        (conn_x + connector_width/2, conn_y + connector_length/4, 'O')
+    # Create base pin positions (relative to left edge)
+    base_pin_positions = [
+        (connector_width/2, -connector_length/4, 'I'),  # Input pin
+        (connector_width/2, connector_length/4, 'O')    # Output pin
     ]
     
-    for px, py, label in pin_positions:
-        # Create circle points
+    # Transform and store actual pin positions
+    pin_positions = []
+    for base_px, base_py, label in base_pin_positions:
+        # Transform pin center
+        px, py = transform_coordinates([base_px], [base_py], position, rotation_deg)
+        pin_positions.append((px[0], py[0], label))
+        
+        # Create and transform circle points for pin
         theta = np.linspace(0, 2*np.pi, 20)
-        circle_x = px + pin_radius * np.cos(theta)
-        circle_y = py + pin_radius * np.sin(theta)
+        circle_base_x = pin_radius * np.cos(theta)
+        circle_base_y = pin_radius * np.sin(theta)
+        
+        # Transform circle points
+        circle_x, circle_y = transform_coordinates(
+            circle_base_x + base_px,
+            circle_base_y + base_py,
+            position, rotation_deg
+        )
         circle_z = [z_top] * len(theta)
         
         fig.add_trace(
@@ -127,13 +194,32 @@ def add_molex_connector(fig: go.Figure, params: dict, z_top: float):
                 mode='lines',
                 line=dict(color='gold', width=2),
                 name=f'Pin {label}',
-                legendgroup='hardware',
+                legendgroup='connector_layer',
                 showlegend=False
             ),
             row=1, col=1
         )
     
-    return conn_x, conn_y
+    # Calculate coil connection point based on rotation
+    coil_x = -outer_turn_width/2
+    
+    # Add connecting traces with proper routing based on rotation
+    for pin_pos in pin_positions:
+        fig.add_trace(
+            go.Scatter3d(
+                x=[pin_pos[0], coil_x],
+                y=[pin_pos[1], pin_pos[1]],
+                z=[z_top, z_top],
+                mode='lines',
+                line=dict(color='gold', width=2),
+                name=f'{pin_pos[2]} Connection',
+                legendgroup='connector_layer',
+                showlegend=False
+            ),
+            row=1, col=1
+        )
+    
+    return position[0], position[1]
 
 def create_3d_visualization(design_data: dict):
     """Create an interactive 3D visualization with 2D info panel"""
@@ -155,13 +241,14 @@ def create_3d_visualization(design_data: dict):
     pcb_thickness = 1.6
     layer_spacing = pcb_thickness / (params['traces']['total_layers'] + 1)
     
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+    # Define metallic colors for alternating traces
+    trace_colors = ['#FFD700', '#C0C0C0']  # Gold and Silver
     
     # Add traces for each layer
     for layer in range(params['traces']['total_layers'] - 1):
         z_offset = layer * layer_spacing
         
-        # Create a "dummy" trace for the layer group that will control visibility
+        # Create a "dummy" trace for the layer group
         fig.add_trace(
             go.Scatter3d(
                 x=[None], y=[None], z=[None],
@@ -180,12 +267,15 @@ def create_3d_visualization(design_data: dict):
             y = np.array(y)
             z = np.full_like(x, z_offset)
             
+            # Alternate between gold and silver for each turn
+            color = trace_colors[i % len(trace_colors)]
+            
             # Add spiral turn
             fig.add_trace(
                 go.Scatter3d(
                     x=x, y=y, z=z,
                     mode='lines',
-                    line=dict(color=colors[layer % len(colors)], width=3),
+                    line=dict(color=color, width=3),
                     name=f'Turn {i + 1}',
                     legendgroup=f'layer{layer + 1}',
                     showlegend=False
@@ -201,11 +291,12 @@ def create_3d_visualization(design_data: dict):
                 via_y = [y[-1], next_y]
                 via_z = [z[-1], z[-1]]
                 
+                # Use the same color as the current turn for its via
                 fig.add_trace(
                     go.Scatter3d(
                         x=via_x, y=via_y, z=via_z,
                         mode='lines',
-                        line=dict(color=colors[layer % len(colors)], width=2, dash='dot'),
+                        line=dict(color=color, width=2, dash='dot'),
                         name=f'Via {i + 1}',
                         legendgroup=f'layer{layer + 1}',
                         showlegend=False
@@ -216,8 +307,106 @@ def create_3d_visualization(design_data: dict):
     # Add top layer components
     z_top = (params['traces']['total_layers'] - 1) * layer_spacing
     
+    # Add Molex connector with alternating gold/silver connections
+    outer_turn_width = params['dimensions']['outer']['width']
+    outer_turn_length = params['dimensions']['outer']['length']
+    connector_width = 5.0
+    connector_length = 8.0
+    position = (-outer_turn_width/2 - connector_width, outer_turn_length/2 - connector_length/2)
+    
+    # Modified add_molex_connector function inline to handle alternating colors
+    connector_width = 5.0
+    connector_length = 8.0
+    pin_radius = 0.6
+    
+    # Create base connector outline
+    base_x = [0, connector_width, connector_width, 0, 0]
+    base_y = [-connector_length/2, -connector_length/2, connector_length/2, connector_length/2, -connector_length/2]
+    
+    # Transform connector outline
+    x, y = transform_coordinates(base_x, base_y, position, 0)
+    z = [z_top] * 5
+    
+    # Add connector outline
+    fig.add_trace(
+        go.Scatter3d(
+            x=x, y=y, z=z,
+            mode='lines',
+            line=dict(color='darkgray', width=3),
+            name='Connector',
+            legendgroup='connector_layer',
+            showlegend=True
+        ),
+        row=1, col=1
+    )
+    
+    # Create base pin positions
+    base_pin_positions = [
+        (connector_width/2, -connector_length/4, 'I'),
+        (connector_width/2, connector_length/4, 'O')
+    ]
+    
+    # Add pins with alternating colors
+    for idx, (base_px, base_py, label) in enumerate(base_pin_positions):
+        # Transform pin center
+        px, py = transform_coordinates([base_px], [base_py], position, 0)
+        
+        # Create circle points for pin
+        theta = np.linspace(0, 2*np.pi, 20)
+        circle_base_x = pin_radius * np.cos(theta)
+        circle_base_y = pin_radius * np.sin(theta)
+        
+        # Transform circle points
+        circle_x, circle_y = transform_coordinates(
+            circle_base_x + base_px,
+            circle_base_y + base_py,
+            position, 0
+        )
+        circle_z = [z_top] * len(theta)
+        
+        # Alternate between gold and silver
+        pin_color = trace_colors[idx % len(trace_colors)]
+        
+        fig.add_trace(
+            go.Scatter3d(
+                x=circle_x, y=circle_y, z=circle_z,
+                mode='lines',
+                line=dict(color=pin_color, width=2),
+                name=f'Pin {label}',
+                legendgroup='connector_layer',
+                showlegend=False
+            ),
+            row=1, col=1
+        )
+        
+        # Add connecting traces
+        coil_x = -outer_turn_width/2
+        fig.add_trace(
+            go.Scatter3d(
+                x=[px[0], coil_x],
+                y=[py[0], py[0]],
+                z=[z_top, z_top],
+                mode='lines',
+                line=dict(color=pin_color, width=2),
+                name=f'{label} Connection',
+                legendgroup='connector_layer',
+                showlegend=False
+            ),
+            row=1, col=1
+        )
+    
+    # Add top layer components
+    z_top = (params['traces']['total_layers'] - 1) * layer_spacing
+    
     # Add Molex connector
-    add_molex_connector(fig, params, z_top)
+    # Position at bottom left, connector starts exactly at the specified position
+    outer_turn_width = params['dimensions']['outer']['width']
+    outer_turn_length = params['dimensions']['outer']['length']
+    connector_width = 5.0
+    connector_length = 8.0
+
+    position = (-outer_turn_width/2 - connector_width, outer_turn_length/2 - connector_length/2)
+    add_molex_connector(fig, params, z_top, position=position, rotation_deg=0)
     
     # Add PCB outline and inner cutout at bottom and top
     outline_pairs = [
@@ -240,10 +429,7 @@ def create_3d_visualization(design_data: dict):
             'Inner Cutout'
         )
     ]
-    
-    # (Previous code remains the same until the create_3d_visualization function's outline_pairs section)
 
-    # Update outline colors to black for light mode
     for x, y, name in outline_pairs:
         for z in [0, z_top]:
             fig.add_trace(
@@ -257,41 +443,6 @@ def create_3d_visualization(design_data: dict):
                 ),
                 row=1, col=1
             )
-    
-    # Add board orientation marker (arrow in bottom-left corner)
-    arrow_size = 5  # mm
-    arrow_margin = 10  # mm from edges
-    marker_x = [-params['dimensions']['outer']['width']/2 + arrow_margin, 
-                -params['dimensions']['outer']['width']/2 + arrow_margin + arrow_size]
-    marker_y = [-params['dimensions']['outer']['length']/2 + arrow_margin, 
-                -params['dimensions']['outer']['length']/2 + arrow_margin]
-    
-    for z in [0, z_top]:
-        # Add arrow shaft
-        fig.add_trace(
-            go.Scatter3d(
-                x=marker_x, y=marker_y, z=[z, z],
-                mode='lines',
-                line=dict(color='black', width=2),
-                name='Orientation Marker',
-                legendgroup='hardware',
-                showlegend=(z == 0)
-            ),
-            row=1, col=1
-        )
-        # Add arrow head
-        fig.add_trace(
-            go.Scatter3d(
-                x=[marker_x[1], marker_x[1], marker_x[1]],
-                y=[marker_y[1], marker_y[1] + arrow_size/2, marker_y[1] - arrow_size/2],
-                z=[z, z, z],
-                mode='lines',
-                line=dict(color='black', width=2),
-                showlegend=False,
-                legendgroup='hardware'
-            ),
-            row=1, col=1
-        )
     
     # Add version text to bottom of info panel
     info_text = format_json_for_display(design_data)
