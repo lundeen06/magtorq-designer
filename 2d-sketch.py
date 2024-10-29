@@ -74,16 +74,34 @@ def plot_layer(paths, params, layer_num, output_dir):
         for path, color in zip(paths, colors):
             ax.plot(path[0], path[1], '-', color=color, linewidth=1)
     else:
-        # H-bridge connection layer
-        pad_radius = min(params['outer_width'], params['outer_length']) * 0.1
-        ax.add_patch(plt.Circle((-params['outer_width']/4, -params['outer_length']/4), 
-                              pad_radius, color='red'))
-        ax.add_patch(plt.Circle((params['outer_width']/4, params['outer_length']/4), 
-                              pad_radius, color='red'))
-        ax.text(-params['outer_width']/4, -params['outer_length']/4, 'IN', 
-                ha='center', va='center', color='white')
-        ax.text(params['outer_width']/4, params['outer_length']/4, 'OUT', 
-                ha='center', va='center', color='white')
+        # Add Molex connector on the top layer
+        connector_width = 5.0  # mm
+        connector_length = 8.0  # mm
+        pin_radius = 0.6       # mm
+        pin_spacing = 2.54     # mm (standard 0.1" pitch)
+        
+        # Position connector just outside board edge
+        conn_x = params['outer_width']/2 + 0.2  # Just 0.2mm gap from board edge
+        conn_y = -params['outer_length']/2 + connector_length/2
+        
+        # Draw connector outline
+        connector = plt.Rectangle((conn_x, conn_y - connector_length/2),
+                                connector_width, connector_length,
+                                facecolor='lightgray', edgecolor='black', linewidth=1)
+        ax.add_patch(connector)
+        
+        # Add connector pins
+        pin_y_positions = [conn_y - pin_spacing/2, conn_y + pin_spacing/2]
+        pin_x = conn_x + connector_width/2  # Pins at center of connector
+        
+        for i, pin_y in enumerate(pin_y_positions):
+            pin = plt.Circle((pin_x, pin_y), pin_radius, 
+                           facecolor='gold', edgecolor='black', linewidth=0.5)
+            ax.add_patch(pin)
+            # Add I/O labels
+            label = 'I' if i == 0 else 'O'
+            ax.text(pin_x + 2*pin_radius, pin_y, label,
+                   ha='left', va='center', fontsize=8)
 
     # Board outlines with thicker black lines (3x original thickness)
     ax.add_patch(plt.Rectangle((-params['outer_width']/2, -params['outer_length']/2), 
@@ -95,8 +113,8 @@ def plot_layer(paths, params, layer_num, output_dir):
     
     # Set equal aspect ratio and limits
     ax.set_aspect('equal')
-    margin = max(params['outer_width'], params['outer_length']) * 0.1
-    ax.set_xlim(-params['outer_width']/2 - margin, params['outer_width']/2 + margin)
+    margin = max(params['outer_width'], params['outer_length']) * 0.15
+    ax.set_xlim(-params['outer_width']/2 - margin, params['outer_width']/2 + margin*1.2)
     ax.set_ylim(-params['outer_length']/2 - margin, params['outer_length']/2 + margin)
     
     # Add title and grid
