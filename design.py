@@ -48,8 +48,29 @@ class MagnetorquerOptimizer:
         self.max_current = self.max_power / self.v_dd
         self.current_density_limit = constants.get('current_density_limit', 35e6)  # A/m²
 
+    def calculate_turn_length(self, turn_number, trace_width):
+        """Calculate length of a specific turn starting from outer edge"""
+        offset = turn_number * (trace_width + self.min_trace_spacing)
+        current_length = self.outer_length - 2 * offset
+        current_width = self.outer_width - 2 * offset
+        
+        # Account for spiral progression
+        long_side1 = current_length
+        short_side1 = current_width
+        long_side2 = current_length - (trace_width + self.min_trace_spacing)
+        short_side2 = current_width - (trace_width + self.min_trace_spacing)
+        
+        return long_side1 + short_side1 + long_side2 + short_side2
+
+    def calculate_area(self, turn_number, trace_width):
+        """Calculate area enclosed by a specific turn starting from outer edge"""
+        offset = turn_number * (trace_width + self.min_trace_spacing)
+        length = self.outer_length - 2 * offset
+        width = self.outer_width - 2 * offset
+        return length * width
+
     def calculate_max_turns(self, trace_width):
-        """Calculate maximum number of turns possible between inner and outer edges"""
+        """Calculate maximum number of turns possible between outer and inner edges"""
         if trace_width <= 0:
             return 0
             
@@ -61,26 +82,13 @@ class MagnetorquerOptimizer:
             return 0
             
         # Calculate turns that can fit in the smaller dimension
+        # Account for trace width and spacing on both sides
         max_turns = min(
-            int(available_height / (trace_width + self.min_trace_spacing)),
-            int(available_width / (trace_width + self.min_trace_spacing))
+            int(available_height / (trace_width + 2 * self.min_trace_spacing)),
+            int(available_width / (trace_width + 2 * self.min_trace_spacing))
         )
         
         return max(1, max_turns)
-
-    def calculate_turn_length(self, turn_number, trace_width):
-        """Calculate length of a specific turn including spiral progression"""
-        offset = turn_number * (trace_width + self.min_trace_spacing)
-        current_length = self.inner_length + 2 * offset
-        current_width = self.inner_width + 2 * offset
-        
-        # Account for spiral progression
-        long_side1 = current_length
-        short_side1 = current_width
-        long_side2 = current_length + (trace_width + self.min_trace_spacing)
-        short_side2 = current_width + (trace_width + self.min_trace_spacing)
-        
-        return long_side1 + short_side1 + long_side2 + short_side2
 
     def calculate_resistance(self, num_turns, trace_width):
         """Calculate total resistance of the rectangular coil"""
@@ -100,13 +108,6 @@ class MagnetorquerOptimizer:
         base_resistance = self.copper_resistivity * total_wire_length / wire_cross_section
         temp_factor = 1 + self.temperature_coefficient * (self.operating_temp - self.ambient_temp)
         return base_resistance * temp_factor
-
-    def calculate_area(self, turn_number, trace_width):
-        """Calculate area enclosed by a specific turn"""
-        offset = turn_number * (trace_width + self.min_trace_spacing)
-        length = self.inner_length + 2 * offset
-        width = self.inner_width + 2 * offset
-        return length * width
 
     def calculate_magnetic_moment(self, num_turns, current):
         """Calculate magnetic moment of rectangular coil"""

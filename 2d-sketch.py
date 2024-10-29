@@ -38,10 +38,13 @@ def generate_spiral_coordinates(params):
     
     paths = []
     
+    # Start from outer edge and work inward
     for i in range(num_turns):
+        # Calculate offset from outer edge
         offset = i * (trace_width + trace_spacing)
-        width = inner_width + 2 * offset
-        length = inner_length + 2 * offset
+        # Start with outer dimensions and subtract offset
+        width = outer_width - 2 * offset
+        length = outer_length - 2 * offset
         
         half_width = width / 2
         half_length = length / 2
@@ -51,9 +54,10 @@ def generate_spiral_coordinates(params):
         
         paths.append((turn_x, turn_y))
         
-        next_width = inner_width + 2 * (offset + trace_width + trace_spacing)
-        next_length = inner_length + 2 * (offset + trace_width + trace_spacing)
-        if next_width >= outer_width or next_length >= outer_length:
+        # Check if next turn would be smaller than inner cutout
+        next_width = outer_width - 2 * (offset + trace_width + trace_spacing)
+        next_length = outer_length - 2 * (offset + trace_width + trace_spacing)
+        if next_width <= inner_width or next_length <= inner_length:
             break
     
     return paths
