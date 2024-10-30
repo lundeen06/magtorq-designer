@@ -100,19 +100,21 @@ The optimizer solves a complex thermal equilibrium equation for both ground and 
 
 Ground testing:
 ```
-P_in = P_convection + P_radiation
-I²R = hA(T - T_ambient) + εσA(T⁴ - T_ambient⁴)
+P_in = P_radiation
+I²R = εσA(T⁴ - T_ambient⁴)
 where:
-h = convection coefficient
 ε = emissivity
 σ = Stefan-Boltzmann constant
 A = surface area
+T = temperature of the magnetorquer's surface
+T_ambient = room temperature
 ```
 
 Space operation:
 ```
 P_in = P_radiation
 I²R = εσA(T⁴ - T_space⁴)
+T_space = base temperature of satellite components
 ```
 
 ### 4. Manufacturing Constraints

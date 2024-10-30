@@ -21,7 +21,6 @@ class MagnetorquerOptimizer:
         self.thermal_conductivity_fr4 = thermal.get('thermal_conductivity_fr4', 0.3)  # W/(m·K)
         self.fr4_thickness = thermal.get('fr4_thickness', 1.6e-3)  # m
         self.surface_area_multiplier = thermal.get('surface_area_multiplier', 2)  # both sides
-        self.convection_coefficient = thermal.get('convection_coefficient', 10)  # W/(m²·K)
         
         # Design constraints
         design = config.get('design_constraints', {})
