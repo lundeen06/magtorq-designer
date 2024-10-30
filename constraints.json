@@ -26,8 +26,8 @@
         "ambient_temp": 20
     },
     "manufacturing_constraints": {
-        "min_trace_width": 0.0002,
+        "min_trace_width": 0.00020,
         "max_trace_width": 0.00045,
-        "min_trace_spacing": 0.0001
+        "min_trace_spacing": 0.00010
     }
 }
