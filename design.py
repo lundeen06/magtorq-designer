@@ -158,23 +158,32 @@ class MagnetorquerOptimizer:
         return True
 
     def calculate_resistance(self, num_turns, trace_width):
-        """Calculate total resistance of the rectangular coil"""
+        """Calculate total resistance of the rectangular coil at room temperature"""
         if num_turns <= 0 or trace_width <= 0:
             return np.inf
             
         # Sum up length of all turns
         total_wire_length = sum(self.calculate_turn_length(turn, trace_width) 
-                              for turn in range(num_turns))
+                            for turn in range(num_turns))
         
         total_wire_length *= self.coil_layers
-        wire_cross_section = self.copper_thickness * trace_width
+        
+        # Use 4.5 mils for copper thickness (more accurate than oz calculation)
+        copper_thickness = 4.5 * 25.4e-6  # convert 4.5 mils to meters
+        wire_cross_section = copper_thickness * trace_width
         
         if wire_cross_section <= 0:
             return np.inf
             
-        base_resistance = self.copper_resistivity * total_wire_length / wire_cross_section
-        temp_factor = 1 + self.temperature_coefficient * (self.operating_temp - self.ambient_temp)
-        return base_resistance * temp_factor
+        # Calculate base resistance at room temperature (20°C)
+        room_temp_resistance = self.copper_resistivity * total_wire_length / wire_cross_section
+        
+        # Only apply temperature compensation if we're not at room temp
+        if self.operating_temp != 20:  # if operating temp is different from room temp
+            temp_factor = 1 + self.temperature_coefficient * (self.operating_temp - 20)
+            return room_temp_resistance * temp_factor
+        
+        return room_temp_resistance
 
     def calculate_magnetic_moment(self, num_turns, current):
         """Calculate magnetic moment of rectangular coil"""
