@@ -49,21 +49,72 @@ class MagnetorquerOptimizer:
         self.current_density_limit = constants.get('current_density_limit', 35e6)  # A/m²
 
     def calculate_turn_length(self, turn_number, trace_width):
-        """Calculate length of a specific turn starting from outer edge"""
+        """Calculate length of a specific turn including connections beyond outer bounds"""
+        # Calculate offset from edge for this turn
         offset = turn_number * (trace_width + self.min_trace_spacing)
+        
+        # Current rectangle dimensions
         current_length = self.outer_length - 2 * offset
         current_width = self.outer_width - 2 * offset
         
-        # Account for spiral progression
-        long_side1 = current_length
-        short_side1 = current_width
-        long_side2 = current_length - (trace_width + self.min_trace_spacing)
-        short_side2 = current_width - (trace_width + self.min_trace_spacing)
+        # Main rectangular path
+        perimeter = 2 * (current_length + current_width)
         
-        return long_side1 + short_side1 + long_side2 + short_side2
+        # Add connection to next turn if not the last turn
+        # Connections can extend beyond outer bounds, so we don't need to constrain them
+        if turn_number < self.calculate_max_turns(trace_width) - 1:
+            # Connection follows the spiral pattern with more freedom
+            connection_horizontal = trace_width + self.min_trace_spacing
+            connection_vertical = trace_width + self.min_trace_spacing
+            connection_length = connection_horizontal + connection_vertical
+        else:
+            # For last turn, just need room for output connection
+            connection_length = trace_width + self.min_trace_spacing
+        
+        return perimeter + connection_length
+
+    def calculate_max_turns(self, trace_width):
+        """Calculate maximum turns ensuring inner clearance for connections"""
+        if trace_width <= 0:
+            return 0
+            
+        # Minimum clearance from inner bounds for connections
+        # Need space for:
+        # 1. The connection trace itself
+        # 2. Minimum spacing requirement
+        # 3. Additional safety margin
+        min_inner_clearance = 2 * (trace_width + 2 * self.min_trace_spacing)
+        
+        # Calculate available space from outer edge to inner edge
+        # Now we need to subtract the clearance from the available space
+        effective_inner_length = self.inner_length + 2 * min_inner_clearance
+        effective_inner_width = self.inner_width + 2 * min_inner_clearance
+        
+        available_height = (self.outer_length - effective_inner_length) / 2
+        available_width = (self.outer_width - effective_inner_width) / 2
+        
+        if available_height <= 0 or available_width <= 0:
+            return 0
+        
+        # Each turn needs space for:
+        # 1. Trace width
+        # 2. Spacing to next turn
+        turn_pitch = trace_width + self.min_trace_spacing
+        
+        # Calculate turns that can fit in the smaller dimension
+        max_turns_height = int(available_height / turn_pitch)
+        max_turns_width = int(available_width / turn_pitch)
+        
+        # Use the more constraining dimension
+        max_turns = min(max_turns_height, max_turns_width)
+        
+        return max(1, max_turns)
 
     def calculate_area(self, turn_number, trace_width):
-        """Calculate area enclosed by a specific spiral turn including connections"""
+        """Calculate area enclosed by a specific turn accounting for inner clearance"""
+        # Calculate minimum clearance requirement
+        min_inner_clearance = 2 * (trace_width + 2 * self.min_trace_spacing)
+        
         # Base offset from outer edge
         offset = turn_number * (trace_width + self.min_trace_spacing)
         
@@ -71,46 +122,40 @@ class MagnetorquerOptimizer:
         length = self.outer_length - 2 * offset
         width = self.outer_width - 2 * offset
         
+        # Verify we're not too close to inner cutout
+        effective_inner_length = self.inner_length + 2 * min_inner_clearance
+        effective_inner_width = self.inner_width + 2 * min_inner_clearance
+        
+        # If this turn would be too close to inner cutout, return 0 area
+        if length < effective_inner_length or width < effective_inner_width:
+            return 0
+        
         # Area of main rectangular path
-        rect_area = length * width
-        
-        # Area of connecting segment to next turn
-        if turn_number < self.calculate_max_turns(trace_width) - 1:
-            # Next turn's dimensions
-            next_offset = (turn_number + 1) * (trace_width + self.min_trace_spacing)
-            next_length = self.outer_length - 2 * next_offset
-            next_width = self.outer_width - 2 * next_offset
-            
-            # Small rectangular area added by connection to next turn
-            # This is approximately the small rectangle formed by the connecting segment
-            connection_width = trace_width + self.min_trace_spacing
-            connection_length = min(length, width) / 2  # Approximate length of connecting segment
-            connection_area = connection_width * connection_length
-        else:
-            connection_area = 0
-        
-        return rect_area + connection_area
+        return length * width
 
-    def calculate_max_turns(self, trace_width):
-        """Calculate maximum number of turns possible between outer and inner edges"""
-        if trace_width <= 0:
-            return 0
-            
-        # Calculate available space in both dimensions
-        available_height = (self.outer_length - self.inner_length) / 2
-        available_width = (self.outer_width - self.inner_width) / 2
+    def is_design_valid(self, trace_width, num_turns):
+        """Validate that design maintains proper clearance from inner cutout"""
+        # Calculate minimum required clearance
+        min_inner_clearance = 2 * (trace_width + 2 * self.min_trace_spacing)
         
-        if available_height <= 0 or available_width <= 0:
-            return 0
-            
-        # Calculate turns that can fit in the smaller dimension
-        # Account for trace width and spacing on both sides
-        max_turns = min(
-            int(available_height / (trace_width + 2 * self.min_trace_spacing)),
-            int(available_width / (trace_width + 2 * self.min_trace_spacing))
-        )
+        # Calculate the innermost turn's position
+        final_offset = (num_turns - 1) * (trace_width + self.min_trace_spacing)
         
-        return max(1, max_turns)
+        # Calculate effective dimensions of innermost turn
+        min_length = self.outer_length - 2 * final_offset
+        min_width = self.outer_width - 2 * final_offset
+        
+        # Check clearance from inner cutout
+        length_clearance = (min_length - self.inner_length) / 2
+        width_clearance = (min_width - self.inner_width) / 2
+        
+        # Both clearances must be greater than minimum required
+        if length_clearance < min_inner_clearance:
+            return False
+        if width_clearance < min_inner_clearance:
+            return False
+        
+        return True
 
     def calculate_resistance(self, num_turns, trace_width):
         """Calculate total resistance of the rectangular coil"""
@@ -243,7 +288,7 @@ class MagnetorquerOptimizer:
         return min(self.v_dd / resistance, self.max_current)
 
     def objective_function(self, x):
-        """Objective function for rectangular coil optimization"""
+        """Modified objective function with relaxed outer bounds"""
         trace_width = x[0]
         
         if trace_width < self.min_trace_width or trace_width > self.max_trace_width:
@@ -251,7 +296,8 @@ class MagnetorquerOptimizer:
             
         max_turns = self.calculate_max_turns(trace_width)
         
-        if max_turns == 0:
+        # Validate design doesn't intrude into inner cutout
+        if not self.is_design_valid(trace_width, max_turns):
             return 0
             
         resistance = self.calculate_resistance(max_turns, trace_width)
@@ -328,6 +374,7 @@ class MagnetorquerOptimizer:
             'inductance': inductance,                                                                           # H * 10^-6              
         }
 
+
 def main():
     # Create optimizer instance with config file
     optimizer = MagnetorquerOptimizer('constraints.json')
@@ -355,9 +402,9 @@ def main():
             "resistance": round(result['resistance'], 2),
             "voltage": round(result['voltage'], 1),
             "current": round(result['current'], 3),
-            "current_density": round(result['current_density']/1e6, 2),
             "power": round(result['power'], 2),
-            "inductance": f"{result['inductance']*1e6:.2f}",
+            "current_density": round(result['current_density']/1e6, 2),
+            "inductance": round(result['inductance']*1e6, 2),
         },
         "thermal": {
             "ground_test": {
@@ -372,7 +419,7 @@ def main():
             }
         },
         "performance": {
-            "magnetic_moment": format(result['magnetic_moment'], '.2e')
+            "magnetic_moment": round(result['magnetic_moment'], 4)
         }
     }
     
