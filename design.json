@@ -17,26 +17,26 @@
     "total_length": 47.2
   },
   "electrical": {
-    "resistance": 18.14,
+    "resistance": 25.39,
     "voltage": 8.2,
-    "current": 0.452,
-    "power": 3.71,
-    "current_density": 14.47,
+    "current": 0.323,
+    "power": 2.65,
+    "current_density": 10.34,
     "inductance": 836.99
   },
   "thermal": {
     "ground_test": {
       "ambient": 20.0,
-      "temperature_rise": 37.1,
-      "final_temperature": 57.1
+      "temperature_rise": 27.8,
+      "final_temperature": 47.8
     },
     "space": {
       "ambient": 0.0,
-      "temperature_rise": 43.7,
-      "final_temperature": 43.7
+      "temperature_rise": 33.0,
+      "final_temperature": 33.0
     }
   },
   "performance": {
-    "magnetic_moment": 0.354
+    "magnetic_moment": 0.253
   }
 }
