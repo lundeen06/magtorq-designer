@@ -1,10 +1,59 @@
+#!/usr/bin/env python3
+
 """
 Optimized KiCad script for magnetorquer coil generation
+Run this directly in KiCad's PCB Editor Python Console (Tools > Scripting Console)
+
+USAGE: put into the KiCad python console function by function, and then run main() at the end! update DESIGN_PARAMS to reflect design.json file
 """
 
 from pcbnew import *
 
-def get_inner_copper_layer_ids():
+# Design parameters (previously in design.json)
+DESIGN_PARAMS = {
+  "dimensions": {
+    "inner": {
+      "length": 97.0,
+      "width": 25.0
+    },
+    "outer": {
+      "length": 132.0,
+      "width": 61.0
+    }
+  },
+  "traces": {
+    "width": 0.45,
+    "spacing": 0.1,
+    "turns_per_layer": 29,
+    "total_layers": 6,
+    "total_length": 47.2
+  },
+  "electrical": {
+    "resistance": 25.39,
+    "voltage": 8.2,
+    "current": 0.323,
+    "power": 2.65,
+    "current_density": 10.34,
+    "inductance": 836.99
+  },
+  "thermal": {
+    "ground_test": {
+      "ambient": 20.0,
+      "temperature_rise": 27.8,
+      "final_temperature": 47.8
+    },
+    "space": {
+      "ambient": 0.0,
+      "temperature_rise": 33.0,
+      "final_temperature": 33.0
+    }
+  },
+  "performance": {
+    "magnetic_moment": 0.253
+  }
+}
+
+def get_inner_copper_layer_ids(board):
     inner_copper_count = board.GetCopperLayerCount() - 2
     layer_ids = []
     for i in range(1000):
@@ -39,103 +88,118 @@ def draw_via(board, x, y, hole_size, outer_diameter):
     v.SetPosition(position)
     v.SetDrill(FromMM(hole_size))
     v.SetWidth(FromMM(outer_diameter))
-    v.SetLayerPair(0, 31)
+    v.SetLayerPair(0, 31)  # Connect F.Cu to B.Cu
     board.Add(v)
 
-# Load optimal parameters from design.json
-with open('design.json', 'r') as f:
-    design_data = json.load(f)
+def main():
+    board = GetBoard()
+    if not board:
+        print("Error: No board found. Please open a PCB file first.")
+        return
 
-# Initialize board
-board = GetBoard()
-delete_all_tracks(board)
+    delete_all_tracks(board)
 
-# Use optimized parameters from design.json
-trace_width = design_data['traces']['width']  # 0.45mm
-trace_spacing = design_data['traces']['spacing']  # 0.1mm
-n_turns = design_data['traces']['turns_per_layer']  # 28
-n_layers = design_data['traces']['total_layers'] - 1  # 5 (excluding H-bridge layer)
+    # Extract parameters from DESIGN_PARAMS
+    trace_width = DESIGN_PARAMS['traces']['width']
+    trace_spacing = DESIGN_PARAMS['traces']['spacing']
+    n_turns = DESIGN_PARAMS['traces']['turns_per_layer']
+    n_layers = DESIGN_PARAMS['traces']['total_layers'] - 1  # excluding H-bridge layer
 
-# Board dimensions from design.json
-x_max = design_data['dimensions']['outer']['width']  # 60mm
-y_max = design_data['dimensions']['outer']['length']  # 131mm
-x_min = design_data['dimensions']['inner']['width']  # 25mm
-y_min = design_data['dimensions']['inner']['length']  # 100mm
+    # Board dimensions
+    x_max = DESIGN_PARAMS['dimensions']['outer']['width']
+    y_max = DESIGN_PARAMS['dimensions']['outer']['length']
+    x_min = DESIGN_PARAMS['dimensions']['inner']['width']
+    y_min = DESIGN_PARAMS['dimensions']['inner']['length']
 
-# Improved positioning and routing parameters
-start_position = (300, 150)  # Keep existing reference point
-bottom_offset = 5.0  # Reduced to minimize excess trace length
-connection_layer = board.GetLayerID("B.Cu")
+    # Calculate starting position relative to board center for proper placement
+    board_info = board.GetBoardEdgesBoundingBox()
+    center_x = board_info.GetCenter().x / 1000000  # Convert from internal units to mm
+    center_y = board_info.GetCenter().y / 1000000
+    
+    # # Start position will be half the outer dimensions from center
+    # start_position = (center_x - x_max/2, center_y - y_max/2)
+    # Put it outside board, we will move it over anyways
+    start_position = (300, 300)
+    bottom_offset = 5.0
+    connection_layer = board.GetLayerID("B.Cu")
 
-layer_ids = get_inner_copper_layer_ids()
-layer_ids.insert(0, board.GetLayerID("F.Cu"))
+    layer_ids = get_inner_copper_layer_ids(board)
+    layer_ids.insert(0, board.GetLayerID("F.Cu"))
 
-# Parallel-series configuration for optimal current distribution
-n_parallel = 1  # Single parallel path for maximum turns
-n_series = n_layers  # All layers in series for maximum voltage handling
+    starting_layers = range(len(layer_ids))
+    end_via_locations = []
 
-starting_layers = range(len(layer_ids))[::n_parallel]
-end_via_locations = []
-
-for parallel_layer_idx in starting_layers:
-    for layer_idx in range(len(layer_ids))[parallel_layer_idx:parallel_layer_idx+n_series]:
+    for layer_idx in range(len(layer_ids)):
         for n in range(n_turns):
             turn_length = trace_spacing + trace_width
             y_track_length = y_max - 2*(n)*(trace_spacing+trace_width)
             x_track_length = x_max - 2*(n)*(trace_spacing+trace_width)
             
-            # Optimize starting positions to maximize area
+            # Starting positions calculating from center
+            x_start = start_position[0] + n*(trace_spacing+trace_width)
             y_start = start_position[1] + n*(trace_spacing+trace_width)
             y_end = y_start + y_track_length
             y_2_end = y_end - trace_spacing - trace_width
-            x_start = start_position[0] + n*(trace_spacing+trace_width)
             x_end = x_start + x_track_length
             x_2_end = x_start + trace_spacing + trace_width
 
-            # Draw optimized spiral pattern
+            # First turn special case - matching 2D visualization
             if n == 0:
-                if layer_idx in starting_layers:
-                    height_offset = 1.2  # Reduced offset for shorter connection length
-                    draw_trace(board, x_start, y_end-turn_length, x_start, y_end+(height_offset*turn_length), trace_width, layer_ids[layer_idx])
+                if layer_idx == 0:
+                    # Input connection
+                    draw_trace(board, x_start, y_end-turn_length, x_start, 
+                             y_end+1.5*turn_length, trace_width, layer_ids[layer_idx])
                 else:
-                    # Optimized series connections between layers
-                    height_offset = 1.2
-                    draw_trace(board, x_start, y_end-turn_length, x_start+turn_length, y_end, trace_width, layer_ids[layer_idx])
-                    draw_trace(board, x_start+turn_length, y_end, x_start+(1.5*(layer_idx+1)*turn_length)+bottom_offset, y_end, trace_width, layer_ids[layer_idx])
-                    draw_trace(board, x_start+(1.5*(layer_idx+1)*turn_length)+bottom_offset, y_end, 
-                             x_start+(1.5*(layer_idx+1)*turn_length)+(height_offset*turn_length)+bottom_offset, 
-                             y_end+height_offset*turn_length, trace_width, layer_ids[layer_idx])
+                    # Connection to previous layer with correct offset
+                    draw_trace(board, x_start, y_end-turn_length, x_start+turn_length, 
+                             y_end, trace_width, layer_ids[layer_idx])
+                    draw_trace(board, x_start+turn_length, y_end, 
+                             x_start+2*(layer_idx+1)*turn_length+5, y_end, 
+                             trace_width, layer_ids[layer_idx])
+                    draw_trace(board, x_start+2*(layer_idx+1)*turn_length+5, y_end,
+                             x_start+2*(layer_idx+1)*turn_length+6.5*turn_length,
+                             y_end+1.5*turn_length, trace_width, layer_ids[layer_idx])
                     
-                    # Improved via placement for better current flow
-                    draw_via(board, x_start+(1.5*(layer_idx+1)*turn_length)+(height_offset*turn_length)+bottom_offset,
-                            y_end+height_offset*turn_length, 0.3, 0.6)
+                    # Via placement matching visualization pattern
+                    draw_via(board, x_start+2*(layer_idx+1)*turn_length+6.5*turn_length,
+                            y_end+1.5*turn_length, 0.3, 0.6)
                     
                     if len(end_via_locations) > 0:
-                        draw_trace(board, x_start+(1.5*(layer_idx+1)*turn_length)+(height_offset*turn_length)+bottom_offset,
-                                 y_end+height_offset*turn_length, end_via_locations[-1][0], end_via_locations[-1][1],
-                                 trace_width, connection_layer)
+                        draw_trace(board, x_start+2*(layer_idx+1)*turn_length+6.5*turn_length,
+                                 y_end+1.5*turn_length, end_via_locations[-1][0], 
+                                 end_via_locations[-1][1], trace_width, connection_layer)
 
-            # Main spiral traces with optimized spacing
-            draw_trace(board, x_start, y_start+turn_length, x_start, y_end-turn_length, trace_width, layer_ids[layer_idx])
-            draw_trace(board, x_start, y_start+turn_length, x_start+turn_length, y_start, trace_width, layer_ids[layer_idx])
-            draw_trace(board, x_start+turn_length, y_start, x_end-turn_length, y_start, trace_width, layer_ids[layer_idx])
-            draw_trace(board, x_end-turn_length, y_start, x_end, y_start+turn_length, trace_width, layer_ids[layer_idx])
-            draw_trace(board, x_end, y_start+turn_length, x_end, y_2_end-turn_length, trace_width, layer_ids[layer_idx])
-            draw_trace(board, x_end, y_2_end-turn_length, x_end-turn_length, y_2_end, trace_width, layer_ids[layer_idx])
+            # Main spiral traces
+            draw_trace(board, x_start, y_start+turn_length, x_start, y_end-turn_length, 
+                      trace_width, layer_ids[layer_idx])
+            draw_trace(board, x_start, y_start+turn_length, x_start+turn_length, 
+                      y_start, trace_width, layer_ids[layer_idx])
+            draw_trace(board, x_start+turn_length, y_start, x_end-turn_length, 
+                      y_start, trace_width, layer_ids[layer_idx])
+            draw_trace(board, x_end-turn_length, y_start, x_end, y_start+turn_length, 
+                      trace_width, layer_ids[layer_idx])
+            draw_trace(board, x_end, y_start+turn_length, x_end, y_2_end-turn_length, 
+                      trace_width, layer_ids[layer_idx])
+            draw_trace(board, x_end, y_2_end-turn_length, x_end-turn_length, y_2_end, 
+                      trace_width, layer_ids[layer_idx])
 
             if n == n_turns-1:
-                # Optimized end connections
-                height_offset = 1.2
-                x_end_final = x_2_end+(1.5*(layer_idx+1)*turn_length)
-                draw_trace(board, x_end-turn_length, y_2_end, x_end_final, y_2_end, trace_width, layer_ids[layer_idx])
-                draw_trace(board, x_end_final, y_2_end, x_end_final-turn_length, y_2_end-(turn_length*height_offset),
+                # Final turn connections matching visualization
+                x_end_final = x_2_end+2*(layer_idx+1)*turn_length
+                draw_trace(board, x_end-turn_length, y_2_end, x_end_final, y_2_end, 
                           trace_width, layer_ids[layer_idx])
-                draw_via(board, x_end_final-turn_length, y_2_end-(turn_length*height_offset), 0.3, 0.6)
-                end_via_locations.append([x_end_final-turn_length, y_2_end-(turn_length*height_offset)])
+                draw_trace(board, x_end_final, y_2_end, x_end_final-turn_length,
+                          y_2_end-1.5*turn_length, trace_width, layer_ids[layer_idx])
+                draw_via(board, x_end_final-turn_length, y_2_end-1.5*turn_length, 0.3, 0.6)
+                end_via_locations.append([x_end_final-turn_length, y_2_end-1.5*turn_length])
             else:
-                draw_trace(board, x_end-turn_length, y_2_end, x_2_end+turn_length, y_2_end, trace_width, layer_ids[layer_idx])
-                draw_trace(board, x_2_end+turn_length, y_2_end, x_2_end, y_2_end-turn_length, trace_width, layer_ids[layer_idx])
+                draw_trace(board, x_end-turn_length, y_2_end, x_2_end+turn_length, 
+                          y_2_end, trace_width, layer_ids[layer_idx])
+                draw_trace(board, x_2_end+turn_length, y_2_end, x_2_end, 
+                          y_2_end-turn_length, trace_width, layer_ids[layer_idx])
 
-print(f"Successfully generated {n_turns} turns across {n_layers} layers")
-print(f"Total tracks: {len(board.GetTracks())}")
-Refresh()
+    print(f"Successfully generated {n_turns} turns across {n_layers} layers")
+    print(f"Total tracks: {len(board.GetTracks())}")
+    Refresh()
+
+main()
