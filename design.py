@@ -186,6 +186,44 @@ class MagnetorquerDesigner:
         from scipy.optimize import fsolve
         T_final = fsolve(heat_balance, T_space + 5)[0]
         return T_final - T_space
+    
+    def calculate_inductance(self, trace_width: float) -> float:
+        """Calculate approximate inductance of the PCB coil using Wheeler's formula"""
+        num_turns = self.calculate_max_turns(trace_width)
+        if num_turns <= 0:
+            return 0
+            
+        # Calculate average diameter (in meters)
+        avg_length = (self.config.outer_length + self.config.inner_length) / 2
+        avg_width = (self.config.outer_width + self.config.inner_width) / 2
+        avg_diameter = (avg_length + avg_width) / 2
+        
+        # Wheeler's formula for rectangular coils (modified for multiple layers)
+        # L = K1 * μ0 * N² * davg * (ln(4*davg/w) - 0.5)
+        # where K1 is an empirical constant ≈ 0.4, N is number of turns, davg is average diameter
+        # and w is the trace width
+        K1 = 0.4
+        inductance = (K1 * self.config.vacuum_permeability * (num_turns * self.coil_layers)**2 * 
+                     avg_diameter * (np.log(4 * avg_diameter / trace_width) - 0.5))
+        
+        return inductance
+
+    def calculate_time_constant(self, trace_width: float) -> float:
+        """Calculate the RL time constant (tau = L/R)"""
+        inductance = self.calculate_inductance(trace_width)
+        resistance = self.calculate_resistance(trace_width)
+        
+        if resistance <= 0:
+            return 0
+            
+        return inductance / resistance
+
+    def calculate_time_to_percentage(self, trace_width: float, target_percentage: float) -> float:
+        """Calculate time to reach a target percentage of final value"""
+        tau = self.calculate_time_constant(trace_width)
+        # Using the formula: percentage = 1 - e^(-t/tau)
+        # Solving for t: t = -tau * ln(1 - percentage)
+        return -tau * np.log(1 - target_percentage)
 
     def calculate_magnetic_moment(self, trace_width: float, current: float) -> float:
         """Calculate magnetic moment of coil"""
@@ -246,7 +284,7 @@ class MagnetorquerDesigner:
     def analyze_result(self, trace_width: float) -> dict:
         """Analyze design results"""
         resistance = self.calculate_resistance(trace_width)
-        current = self.calculate_current(resistance, trace_width)  # Returns amps
+        current = self.calculate_current(resistance, trace_width)
         num_turns = self.calculate_max_turns(trace_width)
         
         # Calculate total wire length
@@ -255,12 +293,17 @@ class MagnetorquerDesigner:
         total_length *= self.coil_layers
         
         # Calculate performance metrics
-        power = current * self.config.voltage  # Power in watts
+        power = current * self.config.voltage
         temp_rise = self.calculate_temperature_rise(power)
         moment = self.calculate_magnetic_moment(trace_width, current)
         
         # Current density in A/m²
         current_density = current / (trace_width * self.copper_thickness)
+        
+        # Calculate time constant metrics
+        inductance = self.calculate_inductance(trace_width)
+        time_constant = self.calculate_time_constant(trace_width)
+        time_to_99_percent = self.calculate_time_to_percentage(trace_width, 0.99)
         
         return {
             "dimensions": {
@@ -274,29 +317,35 @@ class MagnetorquerDesigner:
                 }
             },
             "traces": {
-                "width": round(trace_width * 1000, 3),                      # mm
+                "width": round(trace_width * 1000, 3),                      # mm      
                 "spacing": round(self.config.min_trace_spacing * 1000, 3),  # mm
-                "turns_per_layer": num_turns,
-                "total_layers": self.config.num_layers,
+                "turns_per_layer": num_turns,                               # [dimensionless]
+                "total_layers": self.config.num_layers,                     # [dimensionless]
                 "total_length": round(total_length, 1)                      # m
             },
             "electrical": {
                 "resistance": round(resistance, 2),                         # Ω
                 "voltage": round(self.config.voltage, 2),                   # V
-                "current": round(current, 2),                                  # A
+                "current": round(current, 2),                               # A
                 "power": round(current * self.config.voltage, 2),           # W
-                "current_density": round(current_density/1e6, 2)            # A/mm²
+                "current_density": round(current_density/1e6, 2)            # A/mm^2
             },
             "thermal": {
                 "space": {
-                    "ambient": 0.0,                                         # °C
-                    "temperature_rise": round(temp_rise, 2),                # °C
-                    "final_temperature": round(temp_rise, 2)                # °C
+                    "ambient": 0.0,                                         # ºC
+                    "temperature_rise": round(temp_rise, 2),                # ºC
+                    "final_temperature": round(temp_rise, 2)                # ºC
                 }
+            },
+            "dynamics": {
+                "inductance": round(inductance * 1000, 3),                  # μH
+                "time_constant": round(time_constant * 1000, 2),            # ms
+                "time_to_99_percent": round(time_to_99_percent * 1000, 2),  # ms
+                "max_moment_99_percent": round(moment * 0.9, 4)             # A·m²
             },
             "performance": {
                 "magnetic_moment": round(moment, 4)                         # A·m²
-            }
+            },
         }
 
 def main():
