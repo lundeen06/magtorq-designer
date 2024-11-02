@@ -15,7 +15,7 @@
     "design_constraints": {
         "num_layers": 6,
         "copper_weight": 2,
-        "max_power": 4,
+        "max_power": 0.6,
         "voltage": 8.2,
         "inner_length": 0.097,
         "inner_width": 0.025,
