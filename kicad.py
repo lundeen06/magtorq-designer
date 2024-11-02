@@ -37,11 +37,6 @@ DESIGN_PARAMS = {
     "inductance": 836.99
   },
   "thermal": {
-    "ground_test": {
-      "ambient": 20.0,
-      "temperature_rise": 27.8,
-      "final_temperature": 47.8
-    },
     "space": {
       "ambient": 0.0,
       "temperature_rise": 33.0,

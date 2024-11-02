@@ -38,10 +38,6 @@ def format_design_info(data):
     
     # Thermal
     info.append("\nThermal Analysis:")
-    info.append("  Ground Test:")
-    info.append(f"    Ambient: {data['thermal']['ground_test']['ambient']:.1f}°C")
-    info.append(f"    Rise: {data['thermal']['ground_test']['temperature_rise']:.1f}°C")
-    info.append(f"    Final: {data['thermal']['ground_test']['final_temperature']:.1f}°C")
     info.append("  Space Operation:")
     info.append(f"    Ambient: {data['thermal']['space']['ambient']:.1f}°C")
     info.append(f"    Rise: {data['thermal']['space']['temperature_rise']:.1f}°C")

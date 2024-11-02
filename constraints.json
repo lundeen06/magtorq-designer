@@ -10,7 +10,7 @@
         "thermal_conductivity_copper": 385,
         "thermal_conductivity_fr4": 0.3,
         "fr4_thickness": 0.0016,
-        "surface_area_multiplier": 2,
+        "surface_area_multiplier": 2
     },
     "design_constraints": {
         "num_layers": 6,
@@ -25,8 +25,8 @@
         "ambient_temp": 20
     },
     "manufacturing_constraints": {
-        "min_trace_width": 0.0002,
-        "max_trace_width": 0.00045,
-        "min_trace_spacing": 0.00010
+        "min_trace_width": 0.00016,
+        "max_trace_width": 0.0100,
+        "min_trace_spacing": 0.00016
     }
 }
