@@ -1,16 +1,8 @@
 # Magnetorquer Designer
 
-A comprehensive tool for designing and optimizing PCB-based magnetorquer coils for spacecraft attitude control. This software suite includes physical optimization, thermal analysis, and automated PCB trace generation.
+A comprehensive tool for designing and optimizing PCB-based magnetorquer coils for spacecraft attitude control. This includes physical optimization, thermal analysis, and automated PCB trace generation.
 
-## Overview
-
-This toolset provides end-to-end design capabilities for PCB-based magnetorquers:
-- Physics-based design optimization
-- Thermal analysis for both ground testing and space operations
-- Automated trace generation for KiCad
-- 2D visualization of coil layers
-
-![Example Magnetorquer Layer](output/magnetorquer_layer_1.png)
+![Example Magnetorquer Layer](output/magnetorquer_layer_2.png)
 
 ## Usage
 
