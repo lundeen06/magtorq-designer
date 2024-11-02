@@ -341,7 +341,7 @@ class MagnetorquerDesigner:
                 "inductance": round(inductance * 1000, 3),                  # μH
                 "time_constant": round(time_constant * 1000, 2),            # ms
                 "time_to_99_percent": round(time_to_99_percent * 1000, 2),  # ms
-                "max_moment_99_percent": round(moment * 0.9, 4)             # A·m²
+                "max_moment_99_percent": round(moment * 0.99, 4)             # A·m²
             },
             "performance": {
                 "magnetic_moment": round(moment, 4)                         # A·m²

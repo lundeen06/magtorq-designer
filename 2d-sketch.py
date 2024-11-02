@@ -46,9 +46,9 @@ def format_design_info(data):
     # Dynamics
     info.append("\nDynamics Analysis:")
     info.append(f"    Inductance: {data['dynamics']['inductance']:.1f}μH")
-    info.append(f"    Time constant: {data['dynamics']['time_constant']:.2f}ms")
-    info.append(f"    Time to 99% of magnetic moment: {data['dynamics']['time_to_99_percent']:.1f}ms")
-    info.append(f"    99% of magnetic moment: {data['dynamics']['max_moment_99_percent']:.1f} A·m²")
+    info.append(f"    Time constant: {data['dynamics']['time_constant']}ms")
+    info.append(f"    Time to 99% of magnetic moment: {data['dynamics']['time_to_99_percent']}ms")
+    info.append(f"    99% of magnetic moment: {data['dynamics']['max_moment_99_percent']} A·m²")
     
     # Performance
     info.append("\nPerformance:")

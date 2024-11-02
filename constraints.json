@@ -14,19 +14,19 @@
     },
     "design_constraints": {
         "num_layers": 6,
-        "copper_weight": 2,
+        "copper_weight": 1,
         "max_power": 0.6,
         "voltage": 8.2,
-        "inner_length": 0.097,
-        "inner_width": 0.025,
-        "outer_length": 0.132,
-        "outer_width": 0.061,
+        "inner_length": 0.0600,
+        "inner_width": 0.0600,
+        "outer_length": 0.0850,
+        "outer_width": 0.0850,
         "operating_temp": 65,
         "ambient_temp": 20
     },
     "manufacturing_constraints": {
-        "min_trace_width": 0.00016,
+        "min_trace_width": 0.00010,
         "max_trace_width": 0.0100,
-        "min_trace_spacing": 0.00016
+        "min_trace_spacing": 0.00010
     }
 }
