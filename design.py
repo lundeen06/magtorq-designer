@@ -1,8 +1,12 @@
 import numpy as np
 from dataclasses import dataclass
-from scipy.optimize import minimize
-import json
+from scipy.optimize import minimize, fsolve
 from typing import Dict, Any
+import plotly.graph_objects as go
+import webbrowser
+import os
+import json
+
 
 @dataclass
 class PCBConfig:
@@ -183,7 +187,6 @@ class MagnetorquerDesigner:
             radiation = (0.9 * stefan_boltzmann * area * (T**4 - T_space**4))
             return radiation - power
             
-        from scipy.optimize import fsolve
         T_final = fsolve(heat_balance, T_space + 5)[0]
         return T_final - T_space
     
@@ -257,29 +260,74 @@ class MagnetorquerDesigner:
             
         return True
 
-    def objective_function(self, x: np.ndarray) -> float:
-        """Objective function for optimization (negative magnetic moment)"""
-        trace_width = x[0]
+    def optimize(self, num_points: int = 1000) -> tuple[dict, list, list, list]:
+        """
+        Run optimization and collect data for both plots
         
-        if not self.check_constraints(trace_width):
-            return 0
-            
-        resistance = self.calculate_resistance(trace_width)
-        current = self.calculate_current(resistance, trace_width)
-        moment = self.calculate_magnetic_moment(trace_width, current)
+        Args:
+            num_points: Number of points to evaluate between min and max width
         
-        return -moment if moment > 0 else 0
-
-    def optimize(self) -> dict:
-        """Run optimization and return results"""
-        x0 = [self.config.min_trace_width]
-        bounds = [(self.config.min_trace_width, self.config.max_trace_width)]
+        Returns:
+            tuple: (analysis results dict, width data, moment_vs_width data, moment_vs_current data)
+        """
+        # Create evenly spaced points using numpy
+        widths_array = np.linspace(
+            self.config.min_trace_width,
+            self.config.max_trace_width,
+            num_points
+        )
         
-        result = minimize(self.objective_function, x0,
-                         method='SLSQP',
-                         bounds=bounds)
-                         
-        return self.analyze_result(result.x[0])
+        # Initialize arrays
+        moments_array = np.zeros_like(widths_array)
+        currents_array = np.zeros_like(widths_array)
+        valid_designs = np.zeros_like(widths_array, dtype=bool)
+        
+        # Collect data
+        for i, width in enumerate(widths_array):
+            if self.check_constraints(width):
+                resistance = self.calculate_resistance(width)
+                current = self.calculate_current(resistance, width)
+                moment = self.calculate_magnetic_moment(width, current)
+                
+                moments_array[i] = moment
+                currents_array[i] = current
+                valid_designs[i] = True
+        
+        # Filter out invalid designs
+        valid_widths = widths_array[valid_designs]
+        valid_moments = moments_array[valid_designs]
+        valid_currents = currents_array[valid_designs]
+        
+        # Find optimal point
+        if len(valid_moments) > 0:
+            best_idx = np.argmax(valid_moments)
+            best_width = valid_widths[best_idx]
+            best_current = valid_currents[best_idx]
+            best_moment = valid_moments[best_idx]
+        else:
+            best_width = self.config.min_trace_width
+            best_current = 0
+            best_moment = 0
+        
+        # Create moment vs current data
+        # Generate current points from 0 to P/V
+        max_current = self.config.max_power / self.config.voltage
+        currents = np.linspace(0, max_current, num_points)
+        moments_vs_current = []
+        
+        # Calculate magnetic moment for the optimal trace width at each current
+        for i in currents:
+            moment = self.calculate_magnetic_moment(best_width, i)
+            moments_vs_current.append(moment)
+        
+        # Convert widths to mm for plotting
+        plot_widths = valid_widths * 1000
+        
+        return (
+            self.analyze_result(best_width),
+            (plot_widths.tolist(), valid_moments.tolist(), best_width * 1000, best_moment),
+            (currents.tolist(), moments_vs_current, best_current, best_moment)
+        )
 
     def analyze_result(self, trace_width: float) -> dict:
         """Analyze design results"""
@@ -358,7 +406,128 @@ def main():
     
     # Create designer and optimize
     designer = MagnetorquerDesigner(config)
-    result = designer.optimize()
+    result, width_data, current_data = designer.optimize(num_points=5000)
+    
+    # Unpack plot data
+    widths, moments_width, best_width, best_moment = width_data
+    currents, moments_current, best_current, best_moment = current_data
+    
+    # First plot: Moment vs Width
+    fig1 = go.Figure()
+    
+    fig1.add_trace(
+        go.Scatter(
+            x=widths,
+            y=moments_width,
+            mode='lines',
+            name='Moment vs Width',
+            line=dict(color='blue', width=2)
+        )
+    )
+    
+    # Add optimal point
+    fig1.add_trace(
+        go.Scatter(
+            x=[best_width],
+            y=[best_moment],
+            mode='markers',
+            name='Optimal Point',
+            marker=dict(color='red', size=10, symbol='star')
+        )
+    )
+    
+    # Update layout for first plot
+    fig1.update_layout(
+        title='Magnetic Moment vs Trace Width',
+        xaxis_title='Trace Width (mm)',
+        yaxis_title='Magnetic Moment (A·m²)',
+        hovermode='x',
+        template='plotly_white',
+        showlegend=True
+    )
+    
+    fig1.add_annotation(
+        x=best_width,
+        y=best_moment,
+        text=f'Optimal:\n{best_width:.2f}mm\n{best_moment:.4f}A·m²',
+        showarrow=True,
+        arrowhead=1,
+        yshift=10
+    )
+    
+    # Second plot: Moment vs Current
+    fig2 = go.Figure()
+    
+    fig2.add_trace(
+        go.Scatter(
+            x=currents,
+            y=moments_current,
+            mode='lines',
+            name='Moment vs Current',
+            line=dict(color='green', width=2)
+        )
+    )
+    
+    # Add operating point
+    fig2.add_trace(
+        go.Scatter(
+            x=[best_current],
+            y=[best_moment],
+            mode='markers',
+            name='Operating Point',
+            marker=dict(color='red', size=10, symbol='star')
+        )
+    )
+    
+    # Add V/R and P/V lines
+    optimal_resistance = result['electrical']['resistance']
+    v_over_r = config.voltage / optimal_resistance
+    p_over_v = config.max_power / config.voltage
+    
+    # Add vertical lines with annotations
+    fig2.add_vline(
+        x=v_over_r, 
+        line_dash="dash", 
+        line_color="gray",
+        annotation_text=f"V/R = {v_over_r:.2f}A"
+    )
+    
+    fig2.add_vline(
+        x=p_over_v, 
+        line_dash="dash", 
+        line_color="gray",
+        annotation_text=f"P/V = {p_over_v:.2f}A"
+    )
+    
+    # Update layout for second plot
+    fig2.update_layout(
+        title='Magnetic Moment vs Current',
+        xaxis_title='Current (A)',
+        yaxis_title='Magnetic Moment (A·m²)',
+        hovermode='x',
+        template='plotly_white',
+        showlegend=True
+    )
+    
+    fig2.add_annotation(
+        x=best_current,
+        y=best_moment,
+        text=f'Operating Point:\n{best_current:.2f}A\n{best_moment:.4f}A·m²',
+        showarrow=True,
+        arrowhead=1,
+        yshift=10
+    )
+    
+    # Save and open both plots
+    filename1 = 'magnetic_moment_vs_width.html'
+    filename2 = 'magnetic_moment_vs_current.html'
+    
+    fig1.write_html(filename1)
+    fig2.write_html(filename2)
+    
+    # Open both plots in browser
+    webbrowser.open('file://' + os.path.abspath(filename1))
+    webbrowser.open('file://' + os.path.abspath(filename2))
     
     # Print results
     print(json.dumps(result, indent=2))
