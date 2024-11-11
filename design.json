@@ -10,18 +10,18 @@
     }
   },
   "traces": {
-    "width": 0.378,
+    "width": 0.249,
     "spacing": 0.15,
-    "turns_per_layer": 41,
+    "turns_per_layer": 54,
     "total_layers": 6,
-    "total_length": 52.5
+    "total_length": 69.1
   },
   "electrical": {
-    "resistance": 67.23,
+    "resistance": 67.11,
     "voltage": 8.2,
     "current": 0.12,
     "power": 1.0,
-    "current_density": 9.3
+    "current_density": 7.05
   },
   "thermal": {
     "space": {
@@ -31,12 +31,12 @@
     }
   },
   "dynamics": {
-    "inductance": 7.914,
-    "time_constant": 0.12,
-    "time_to_99_percent": 0.54,
-    "max_moment_99_percent": 0.1049
+    "inductance": 14.683,
+    "time_constant": 0.22,
+    "time_to_99_percent": 1.01,
+    "max_moment_99_percent": 0.1379
   },
   "performance": {
-    "magnetic_moment": 0.1059
+    "magnetic_moment": 0.1393
   }
 }

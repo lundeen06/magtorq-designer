@@ -230,7 +230,7 @@ def plot_layer(paths, params, design_data, layer_num, output_dir):
     # Adjust layout and save
     plt.tight_layout()
     output_path = os.path.join(output_dir, f'magnetorquer_layer_{layer_num + 1}.png')
-    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.savefig(output_path, dpi=350, bbox_inches='tight')
     print(f"Successfully saved {output_path}")
 
 def plot_magnetorquer(design_data):
