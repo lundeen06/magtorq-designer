@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 import numpy as np
+import sys
 import json
 import os
 
@@ -136,7 +137,27 @@ def generate_spiral_coordinates(params, layer_idx):
     
     return paths
 
-def plot_layer(paths, params, design_data, layer_num, output_dir):
+
+def ensure_output_directory():
+    """Create output directory if it doesn't exist"""
+    output_dir = "output"
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    return output_dir
+
+
+def get_base_filename(design_file):
+    """Extract base filename from design file path"""
+    # Get just the filename without path
+    filename = os.path.basename(design_file)
+    # Remove '-design.json' suffix if present
+    if filename.endswith('-design.json'):
+        return filename[:-12]  # Remove '-design.json'
+    # If doesn't end with -design.json, just remove .json
+    return os.path.splitext(filename)[0]
+
+
+def plot_layer(paths, params, design_data, layer_num, output_dir, base_filename):
     """Plot a single layer with realistic wire routing and complete design information"""
     # Create figure with adjusted size for info panel
     plt.figure(figsize=(12, 8))
@@ -215,7 +236,7 @@ def plot_layer(paths, params, design_data, layer_num, output_dir):
     ax_main.set_xlim(-params['outer_width']/2 - margin, params['outer_width']/2 + margin*1.5)
     ax_main.set_ylim(-params['outer_length']/2 - margin, params['outer_length']/2 + margin)
     
-    title = f'Layer {layer_num + 1}' + (' (H-Bridge Connections)' if layer_num == params['num_layers'] - 1 else '')
+    title = f'{(lambda x: " ".join(word.capitalize() for word in x.split("-")))(base_filename)} Layer {layer_num + 1}' + (' (H-Bridge Connections)' if layer_num == params['num_layers'] - 1 else '')
     ax_main.set_title(title)
     ax_main.grid(True, linestyle='--', alpha=0.3)
     
@@ -229,13 +250,15 @@ def plot_layer(paths, params, design_data, layer_num, output_dir):
     
     # Adjust layout and save
     plt.tight_layout()
-    output_path = os.path.join(output_dir, f'magnetorquer_layer_{layer_num + 1}.png')
+    output_filename = f"{base_filename}-layer_{layer_num + 1}.png"
+    output_path = os.path.join(output_dir, output_filename)
     plt.savefig(output_path, dpi=350, bbox_inches='tight')
     print(f"Successfully saved {output_path}")
 
-def plot_magnetorquer(design_data):
+def plot_magnetorquer(design_data, design_file):  # Added design_file parameter
     """Create visualization of all layers with complete design information"""
     output_dir = ensure_output_directory()
+    base_filename = get_base_filename(design_file)
     
     params = {
         'inner_length': design_data['dimensions']['inner']['length'],
@@ -250,14 +273,25 @@ def plot_magnetorquer(design_data):
     
     for i in range(params['num_layers']):
         paths = generate_spiral_coordinates(params, i)
-        plot_layer(paths, params, design_data, i, output_dir)
+        plot_layer(paths, params, design_data, i, output_dir, base_filename)
     
     plt.show()
 
 if __name__ == "__main__":
+    # Check if a file path was provided
+    if len(sys.argv) < 2:
+        print("Usage: python script.py <path_to_design_file>")
+        sys.exit(1)
+    
+    design_file = sys.argv[1]
+    
     try:
-        with open('design.json', 'r') as f:
+        with open(design_file, 'r') as f:
             design_data = json.load(f)
-        plot_magnetorquer(design_data)
+        plot_magnetorquer(design_data, design_file)  # Pass design_file to function
+    except FileNotFoundError:
+        print(f"Error: Design file '{design_file}' not found")
+    except json.JSONDecodeError:
+        print(f"Error: '{design_file}' contains invalid JSON")
     except Exception as e:
         print(f"Error: {e}")

@@ -3,9 +3,12 @@ from dataclasses import dataclass
 from scipy.optimize import minimize, fsolve
 from typing import Dict, Any
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import plotly.io as pio
 import webbrowser
 import os
 import json
+import sys
 
 
 @dataclass
@@ -191,35 +194,49 @@ class MagnetorquerDesigner:
         return T_final - T_space
     
     def calculate_inductance(self, trace_width: float) -> float:
-        """Calculate approximate inductance of the PCB coil using Wheeler's formula"""
+        """Calculate inductance of PCB coil using Wheeler's formula for rectangular coils
+        
+        Args:
+            trace_width: Width of the PCB trace in meters
+        Returns:
+            Inductance in Henries
+        """
         num_turns = self.calculate_max_turns(trace_width)
         if num_turns <= 0:
             return 0
             
-        # Calculate average diameter (in meters)
-        avg_length = (self.config.outer_length + self.config.inner_length) / 2
-        avg_width = (self.config.outer_width + self.config.inner_width) / 2
+        # Calculate average diameter 
+        spacing = trace_width + self.config.min_trace_spacing
+        avg_length = self.config.outer_length - spacing * num_turns
+        avg_width = self.config.outer_width - spacing * num_turns
         avg_diameter = (avg_length + avg_width) / 2
         
-        # Wheeler's formula for rectangular coils (modified for multiple layers)
-        # L = K1 * μ0 * N² * davg * (ln(4*davg/w) - 0.5)
-        # where K1 is an empirical constant ≈ 0.4, N is number of turns, davg is average diameter
-        # and w is the trace width
-        K1 = 0.4
-        inductance = (K1 * self.config.vacuum_permeability * (num_turns * self.coil_layers)**2 * 
-                     avg_diameter * (np.log(4 * avg_diameter / trace_width) - 0.5))
+        # Wheeler's formula for rectangular coils
+        inductance = (31.33 * self.config.vacuum_permeability * 
+                    num_turns**2 * avg_diameter / 8)
+                    
+        # Account for multiple layers
+        inductance *= self.coil_layers
         
         return inductance
 
     def calculate_time_constant(self, trace_width: float) -> float:
-        """Calculate the RL time constant (tau = L/R)"""
+        """Calculate the RL time constant (τ = L/R)
+        
+        Args:
+            trace_width: Width of the PCB trace in meters
+        Returns:
+            Time constant in seconds
+        """
         inductance = self.calculate_inductance(trace_width)
         resistance = self.calculate_resistance(trace_width)
         
         if resistance <= 0:
             return 0
             
-        return inductance / resistance
+        tau = inductance / resistance
+        return tau
+    
 
     def calculate_time_to_percentage(self, trace_width: float, target_percentage: float) -> float:
         """Calculate time to reach a target percentage of final value"""
@@ -227,6 +244,35 @@ class MagnetorquerDesigner:
         # Using the formula: percentage = 1 - e^(-t/tau)
         # Solving for t: t = -tau * ln(1 - percentage)
         return -tau * np.log(1 - target_percentage)
+    
+    def calculate_power_efficiency(self, moment: float, current: float, resistance: float) -> float:
+        """Calculate power efficiency as magnetic moment per watt of input power
+        
+        Args:
+            moment: Magnetic moment in A·m²
+            current: Current in amperes
+            resistance: Resistance in ohms
+            
+        Returns:
+            Power efficiency in A·m²/W
+        """
+        # Calculate power using P = I * V since we're using a constant voltage source
+        power = current * self.config.voltage
+        
+        if power <= 0:
+            return 0
+            
+        return moment / power  # Units: (A·m²) / W = A·m²/W
+        
+    def calculate_thermal_efficiency(self, current, moment, power, temp_rise) -> float:
+        """Calculate thermal efficiency as moment per degree C rise"""
+        power = current * self.config.voltage
+        temp_rise = self.calculate_temperature_rise(power)
+        
+        if temp_rise <= 0:
+            return 0
+            
+        return moment / temp_rise
 
     def calculate_magnetic_moment(self, trace_width: float, current: float) -> float:
         """Calculate magnetic moment of coil"""
@@ -260,75 +306,105 @@ class MagnetorquerDesigner:
             
         return True
 
-    def optimize(self, num_points: int = 1000) -> tuple[dict, list, list, list]:
-        """
-        Run optimization and collect data for both plots
-        
-        Args:
-            num_points: Number of points to evaluate between min and max width
-        
-        Returns:
-            tuple: (analysis results dict, width data, moment_vs_width data, moment_vs_current data)
-        """
-        # Create evenly spaced points using numpy
-        widths_array = np.linspace(
-            self.config.min_trace_width,
-            self.config.max_trace_width,
+    def optimize(self, num_points: int = 5000) -> tuple[dict, list, list, list, list]:
+        widths_array = np.logspace(
+            np.log10(self.config.min_trace_width),
+            np.log10(self.config.max_trace_width),
             num_points
         )
         
-        # Initialize arrays
         moments_array = np.zeros_like(widths_array)
-        currents_array = np.zeros_like(widths_array)
+        thermal_eff_array = np.zeros_like(widths_array)
+        power_eff_array = np.zeros_like(widths_array)
+        tau_array = np.zeros_like(widths_array)
         valid_designs = np.zeros_like(widths_array, dtype=bool)
         
-        # Collect data
+        num_turns_array = np.zeros_like(widths_array)
+        resistance_array = np.zeros_like(widths_array)
+        inductance_array = np.zeros_like(widths_array)
+        current_array = np.zeros_like(widths_array)
+        
+        debug_interval = num_points // 10
         for i, width in enumerate(widths_array):
             if self.check_constraints(width):
                 resistance = self.calculate_resistance(width)
                 current = self.calculate_current(resistance, width)
                 moment = self.calculate_magnetic_moment(width, current)
+                power = current * self.config.voltage  # Use V*I for power
+                temp_rise = self.calculate_temperature_rise(power)
+                inductance = self.calculate_inductance(width)
+                tau = self.calculate_time_constant(width)
+                num_turns = self.calculate_max_turns(width)
                 
                 moments_array[i] = moment
-                currents_array[i] = current
+                thermal_eff_array[i] = self.calculate_thermal_efficiency(current, moment, power, temp_rise)
+                power_eff_array[i] = self.calculate_power_efficiency(moment, current, resistance)
+                tau_array[i] = tau * 1000
                 valid_designs[i] = True
+                
+                num_turns_array[i] = num_turns
+                resistance_array[i] = resistance
+                inductance_array[i] = inductance
+                current_array[i] = current
         
-        # Filter out invalid designs
-        valid_widths = widths_array[valid_designs]
-        valid_moments = moments_array[valid_designs]
-        valid_currents = currents_array[valid_designs]
-        
-        # Find optimal point
+        print("\nOverall Trends:")
+        valid_mask = valid_designs & ~np.isnan(moments_array)
+        print(f"Number of valid designs: {np.sum(valid_mask)}")
+        print(f"Number of turns range: {int(np.min(num_turns_array[valid_mask]))} to {int(np.max(num_turns_array[valid_mask]))}")
+        print(f"Resistance range: {np.min(resistance_array[valid_mask]):.2f} to {np.max(resistance_array[valid_mask]):.2f} Ω")
+        print(f"Inductance range: {np.min(inductance_array[valid_mask])*1000:.2f} to {np.max(inductance_array[valid_mask])*1000:.2f} μH")
+        print(f"Current range: {np.min(current_array[valid_mask]):.3f} to {np.max(current_array[valid_mask]):.3f} A")
+        print(f"Moment range: {np.min(moments_array[valid_mask]):.6f} to {np.max(moments_array[valid_mask]):.6f} A·m²")
+        print(f"Time constant range: {np.min(tau_array[valid_mask]):.2f} to {np.max(tau_array[valid_mask]):.2f} ms")
+
+        valid_mask = valid_designs & ~np.isnan(moments_array)
+        valid_widths = widths_array[valid_mask]
+        valid_moments = moments_array[valid_mask]
+        valid_thermal_eff = thermal_eff_array[valid_mask]
+        valid_power_eff = power_eff_array[valid_mask]
+        valid_tau = tau_array[valid_mask]
+
         if len(valid_moments) > 0:
-            best_idx = np.argmax(valid_moments)
-            best_width = valid_widths[best_idx]
-            best_current = valid_currents[best_idx]
-            best_moment = valid_moments[best_idx]
+            moment_idx = np.argmax(valid_moments)
+            best_moment_width = valid_widths[moment_idx]
+            best_moment = valid_moments[moment_idx]
+            
+            thermal_idx = np.argmax(valid_thermal_eff)
+            best_thermal_width = valid_widths[thermal_idx]
+            best_thermal_eff = valid_thermal_eff[thermal_idx]
+            
+            power_idx = np.argmax(valid_power_eff)
+            best_power_width = valid_widths[power_idx]
+            best_power_eff = valid_power_eff[power_idx]
+            
+            tau_idx = np.argmin(valid_tau)
+            best_tau_width = valid_widths[tau_idx]
+            best_tau = valid_tau[tau_idx]
+            
+            print("\nOptimal Points:")
+            print(f"Best moment: {best_moment:.6f} A·m² at width {best_moment_width*1000:.3f} mm")
+            print(f"Best thermal efficiency: {best_thermal_eff:.6f} A·m²/°C at width {best_thermal_width*1000:.3f} mm")
+            print(f"Best power efficiency: {best_power_eff:.6f} A·m²/W at width {best_power_width*1000:.3f} mm")
+            print(f"Best time constant: {best_tau:.2f} ms at width {best_tau_width*1000:.3f} mm")
         else:
-            best_width = self.config.min_trace_width
-            best_current = 0
-            best_moment = 0
+            best_moment_width = best_thermal_width = best_power_width = best_tau_width = self.config.min_trace_width
+            best_moment = best_thermal_eff = best_power_eff = best_tau = 0
         
-        # Create moment vs current data
-        # Generate current points from 0 to P/V
-        max_current = self.config.max_power / self.config.voltage
-        currents = np.linspace(0, max_current, num_points)
-        moments_vs_current = []
-        
-        # Calculate magnetic moment for the optimal trace width at each current
-        for i in currents:
-            moment = self.calculate_magnetic_moment(best_width, i)
-            moments_vs_current.append(moment)
-        
-        # Convert widths to mm for plotting
         plot_widths = valid_widths * 1000
         
+        moment_data = (plot_widths.tolist(), valid_moments.tolist(), best_moment_width * 1000, best_moment)
+        thermal_data = (plot_widths.tolist(), valid_thermal_eff.tolist(), best_thermal_width * 1000, best_thermal_eff)
+        power_data = (plot_widths.tolist(), valid_power_eff.tolist(), best_power_width * 1000, best_power_eff)
+        tau_data = (plot_widths.tolist(), valid_tau.tolist(), best_tau_width * 1000, best_tau)
+        
         return (
-            self.analyze_result(best_width),
-            (plot_widths.tolist(), valid_moments.tolist(), best_width * 1000, best_moment),
-            (currents.tolist(), moments_vs_current, best_current, best_moment)
+            self.analyze_result(best_moment_width),
+            moment_data,
+            thermal_data,
+            power_data,
+            tau_data
         )
-
+   
     def analyze_result(self, trace_width: float) -> dict:
         """Analyze design results"""
         resistance = self.calculate_resistance(trace_width)
@@ -395,142 +471,228 @@ class MagnetorquerDesigner:
                 "magnetic_moment": round(moment, 4)                         # A·m²
             },
         }
+    
+def ensure_directories():
+    """Create necessary output directories if they don't exist"""
+    directories = ['output', 'designs', 'plots']
+    for directory in directories:
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+            print(f"Created directory: {directory}")
+    return directories
+
+def get_base_filename(constraints_file: str) -> str:
+    """Extract base filename from constraints file path"""
+    # Get just the filename without path
+    filename = os.path.basename(constraints_file)
+    # Remove '-constraints.json' suffix if present
+    if filename.endswith('-constraints.json'):
+        return filename[:-17]  # Remove '-constraints.json'
+    # If doesn't end with -constraints.json, just remove .json
+    return os.path.splitext(filename)[0]
 
 def main():
-    # Load configuration
-    with open('constraints.json', 'r') as f:
-        config_data = json.load(f)
+    # Check if a constraints file was provided
+    if len(sys.argv) < 2:
+        print("Usage: python script.py <path_to_constraints_file>")
+        sys.exit(1)
+        
+    constraints_file = sys.argv[1]
     
-    # Create config object
-    config = PCBConfig.from_json(config_data)
-    
-    # Create designer and optimize
-    designer = MagnetorquerDesigner(config)
-    result, width_data, current_data = designer.optimize(num_points=5000)
-    
-    # Unpack plot data
-    widths, moments_width, best_width, best_moment = width_data
-    currents, moments_current, best_current, best_moment = current_data
-    
-    # First plot: Moment vs Width
-    fig1 = go.Figure()
-    
-    fig1.add_trace(
-        go.Scatter(
-            x=widths,
-            y=moments_width,
-            mode='lines',
-            name='Moment vs Width',
-            line=dict(color='blue', width=2)
+    try:
+        # Create output directories
+        ensure_directories()
+        
+        # Get base name for output files
+        base_filename = get_base_filename(constraints_file)
+        
+        # Load configuration
+        with open(constraints_file, 'r') as f:
+            config_data = json.load(f)
+        
+        # Create config object
+        config = PCBConfig.from_json(config_data)
+        
+        # Create designer and optimize
+        designer = MagnetorquerDesigner(config)
+        result, moment_data, thermal_data, power_data, tau_data = designer.optimize(num_points=5000)
+        
+        # Unpack plot data
+        widths, moments, best_moment_width, best_moment = moment_data
+        _, thermal_eff, best_thermal_width, best_thermal = thermal_data
+        _, power_eff, best_power_width, best_power = power_data
+        _, taus, best_tau_width, best_tau = tau_data
+        
+        # Create figure with subplots (1x2 grid)
+        fig = make_subplots(
+            rows=1, cols=2,
+            subplot_titles=(
+                'Magnetic Moment vs Trace Width', 
+                # 'Thermal Efficiency (Am²/°C) vs Trace Width',
+                'Power Efficiency (Am²/W) vs Trace Width',
+                # 'Time Constant τ (ms) vs Trace Width'
+            ),
+            horizontal_spacing=0.15,
+            vertical_spacing=0.15
         )
-    )
-    
-    # Add optimal point
-    fig1.add_trace(
-        go.Scatter(
-            x=[best_width],
-            y=[best_moment],
-            mode='markers',
-            name='Optimal Point',
-            marker=dict(color='red', size=10, symbol='star')
+
+        # Plot 1: Moment vs Width (top left)
+        fig.add_trace(
+            go.Scatter(
+                x=widths,
+                y=moments,
+                mode='lines',
+                name='Magnetic Moment',
+                line=dict(color='rgb(0, 123, 255)', width=2)
+            ),
+            row=1, col=1
         )
-    )
-    
-    # Update layout for first plot
-    fig1.update_layout(
-        title='Magnetic Moment vs Trace Width',
-        xaxis_title='Trace Width (mm)',
-        yaxis_title='Magnetic Moment (A·m²)',
-        hovermode='x',
-        template='plotly_white',
-        showlegend=True
-    )
-    
-    fig1.add_annotation(
-        x=best_width,
-        y=best_moment,
-        text=f'Optimal:\n{best_width:.2f}mm\n{best_moment:.4f}A·m²',
-        showarrow=True,
-        arrowhead=1,
-        yshift=10
-    )
-    
-    # Second plot: Moment vs Current
-    fig2 = go.Figure()
-    
-    fig2.add_trace(
-        go.Scatter(
-            x=currents,
-            y=moments_current,
-            mode='lines',
-            name='Moment vs Current',
-            line=dict(color='green', width=2)
+        
+        fig.add_trace(
+            go.Scatter(
+                x=[best_moment_width],
+                y=[best_moment],
+                mode='markers',
+                name='Maximum Moment',
+                marker=dict(
+                    color='rgb(220, 53, 69)',
+                    size=12,
+                    symbol='star-diamond',
+                    line=dict(color='rgb(150, 20, 30)', width=2)
+                )
+            ),
+            row=1, col=1
         )
-    )
-    
-    # Add operating point
-    fig2.add_trace(
-        go.Scatter(
-            x=[best_current],
-            y=[best_moment],
-            mode='markers',
-            name='Operating Point',
-            marker=dict(color='red', size=10, symbol='star')
+
+        # # Plot 2: Thermal Efficiency (top right)
+        # fig.add_trace(
+        #     go.Scatter(
+        #         x=widths,
+        #         y=thermal_eff,
+        #         mode='lines',
+        #         name='Thermal Efficiency',
+        #         line=dict(color='rgb(40, 167, 69)', width=2)
+        #     ),
+        #     row=1, col=2
+        # )
+        
+        # fig.add_trace(
+        #     go.Scatter(
+        #         x=[best_thermal_width],
+        #         y=[best_thermal],
+        #         mode='markers',
+        #         name='Best Thermal Efficiency',
+        #         marker=dict(
+        #             color='rgb(25, 135, 84)',
+        #             size=12,
+        #             symbol='star-diamond',
+        #             line=dict(color='rgb(15, 95, 55)', width=2)
+        #         )
+        #     ),
+        #     row=1, col=2
+        # )
+
+        # Plot 3: Power Efficiency (bottom left)
+        fig.add_trace(
+            go.Scatter(
+                x=widths,
+                y=power_eff,
+                mode='lines',
+                name='Power Efficiency',
+                line=dict(color='rgb(111, 66, 193)', width=2)
+            ),
+            row=1, col=2
         )
-    )
-    
-    # Add V/R and P/V lines
-    optimal_resistance = result['electrical']['resistance']
-    v_over_r = config.voltage / optimal_resistance
-    p_over_v = config.max_power / config.voltage
-    
-    # Add vertical lines with annotations
-    fig2.add_vline(
-        x=v_over_r, 
-        line_dash="dash", 
-        line_color="gray",
-        annotation_text=f"V/R = {v_over_r:.2f}A"
-    )
-    
-    fig2.add_vline(
-        x=p_over_v, 
-        line_dash="dash", 
-        line_color="gray",
-        annotation_text=f"P/V = {p_over_v:.2f}A"
-    )
-    
-    # Update layout for second plot
-    fig2.update_layout(
-        title='Magnetic Moment vs Current',
-        xaxis_title='Current (A)',
-        yaxis_title='Magnetic Moment (A·m²)',
-        hovermode='x',
-        template='plotly_white',
-        showlegend=True
-    )
-    
-    fig2.add_annotation(
-        x=best_current,
-        y=best_moment,
-        text=f'Operating Point:\n{best_current:.2f}A\n{best_moment:.4f}A·m²',
-        showarrow=True,
-        arrowhead=1,
-        yshift=10
-    )
-    
-    # Save and open both plots
-    filename1 = 'magnetic_moment_vs_width.html'
-    filename2 = 'magnetic_moment_vs_current.html'
-    
-    fig1.write_html(filename1)
-    fig2.write_html(filename2)
-    
-    # Open both plots in browser
-    webbrowser.open('file://' + os.path.abspath(filename1))
-    webbrowser.open('file://' + os.path.abspath(filename2))
-    
-    # Print results
-    print(json.dumps(result, indent=2))
+        
+        fig.add_trace(
+            go.Scatter(
+                x=[best_power_width],
+                y=[best_power],
+                mode='markers',
+                name='Best Power Efficiency',
+                marker=dict(
+                    color='rgb(128, 0, 128)',
+                    size=12,
+                    symbol='star-diamond',
+                    line=dict(color='rgb(76, 0, 76)', width=2)
+                )
+            ),
+            row=1, col=2
+        )
+
+        # # Plot 4: Time Constant (bottom right)
+        # fig.add_trace(
+        #     go.Scatter(
+        #         x=widths,
+        #         y=taus,
+        #         mode='lines',
+        #         name='Time Constant',
+        #         line=dict(color='rgb(255, 193, 7)', width=2)
+        #     ),
+        #     row=2, col=2
+        # )
+        
+        # fig.add_trace(
+        #     go.Scatter(
+        #         x=[best_tau_width],
+        #         y=[best_tau],
+        #         mode='markers',
+        #         name='Minimum Time Constant',
+        #         marker=dict(
+        #             color='rgb(253, 126, 20)',
+        #             size=12,
+        #             symbol='star-diamond',
+        #             line=dict(color='rgb(210, 100, 0)', width=2)
+        #         )
+        #     ),
+        #     row=2, col=2
+        # )
+
+        # Update axes labels and properties
+        for row in [1, 2]:
+            for col in [1, 2]:
+                fig.update_xaxes(
+                    title='Trace Width (mm)',
+                    gridcolor='lightgray',
+                    showgrid=True,
+                    row=row,
+                    col=col
+                )
+
+        # Update y-axis titles
+        fig.update_yaxes(title='Magnetic Moment (A·m²)', row=1, col=1)
+        # fig.update_yaxes(title='Moment/°C (A·m²/°C)', row=1, col=2)
+        fig.update_yaxes(title='Moment/Power (A·m²/W)', row=2, col=1)
+        # fig.update_yaxes(title='Time Constant (ms)', row=2, col=2)
+
+        # Update overall layout
+        fig.update_layout(
+            height=500,
+            width=1400,
+            showlegend=True,
+            template='plotly_white',
+            hovermode='x unified',
+            title=f"{(lambda x: " ".join(word.capitalize() for word in x.split("-")))(base_filename)} Design Analysis Plots"
+        )
+
+        # Save and open plot
+        filename = f'plots/{base_filename}-design-analysis.html'
+        fig.write_html(filename)
+        webbrowser.open('file://' + os.path.abspath(filename))
+        pio.write_image(fig, f'plots/{base_filename}-design-analysis.png')
+        
+        # Save JSON file
+        json_filename = f'designs/{base_filename}-design.json'
+        with open(json_filename, 'w') as f:
+            json.dump(result, f, indent=2)
+        print(f"JSON saved to: {json_filename}")
+
+    except FileNotFoundError:
+        print(f"Error: Constraints file '{constraints_file}' not found")
+    except json.JSONDecodeError:
+        print(f"Error: '{constraints_file}' contains invalid JSON")
+    except Exception as e:
+        print(f"Error: {e}")
 
 if __name__ == "__main__":
     main()

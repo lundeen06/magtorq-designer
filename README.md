@@ -2,11 +2,12 @@
 
 A comprehensive tool for designing and optimizing PCB-based magnetorquer coils for spacecraft attitude control. This includes physical optimization, thermal analysis, and automated PCB trace generation.
 
-![Example Magnetorquer Layer](output/magnetorquer_layer_2.png)
+<img src="output/z-magnetorquer-layer_2.png" width="1000" alt="Example Magnetorquer Layer">
+<img src="plots/z-magnetorquer-design-analysis.png" width="1000" alt="Example Magnetorquer Analysis Plots">
 
 ## Usage
 
-1. Configure design constraints in `constraints.json`:
+1. Configure design constraints in `/constraints/[BOARD_NAME]-constraints.json`:
    ```json
    {
      "design_constraints": {

@@ -1,0 +1,32 @@
+{
+    "physical_constants": {
+        "vacuum_permeability": 1.25663706e-6,
+        "copper_resistivity": 1.68e-8,
+        "temperature_coefficient": 0.00393,
+        "oz_to_m": 0.0347e-3,
+        "current_density_limit": 35e6
+    },
+    "thermal_properties": {
+        "thermal_conductivity_copper": 385,
+        "thermal_conductivity_fr4": 0.3,
+        "fr4_thickness": 0.0016,
+        "surface_area_multiplier": 2
+    },
+    "design_constraints": {
+        "num_layers": 6,
+        "copper_weight": 2,
+        "max_power": 1,
+        "voltage": 8.2,
+        "inner_length": 0.0400,
+        "inner_width": 0.0400,
+        "outer_length": 0.0850,
+        "outer_width": 0.0850,
+        "operating_temp": 65,
+        "ambient_temp": 20
+    },
+    "manufacturing_constraints": {
+        "min_trace_width": 0.00015,
+        "max_trace_width": 0.0010,
+        "min_trace_spacing": 0.00015
+    }
+}
